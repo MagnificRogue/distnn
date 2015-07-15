@@ -3,4 +3,4 @@ torch = require 'torch'
 
 
 --example of creating a new input object
-input = distnn.Input.new(1,2,3)
+input = distnn.Input.new(torch.Tensor(1),torch.Tensor(2),3)
