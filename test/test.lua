@@ -1,3 +1,3 @@
-example = require 'examplepackage'
+distnn = require 'distnn'
 
-example.hellomodule.sayhello()
+distnn.hellomodule.sayhello()

@@ -1,8 +1,8 @@
-package = "examplepackage"
+package = "distnn"
 version = "scm-1"
 
 source = {
-   url = "git://github.com/soumith/examplepackage.torch",
+   url = "git://github.com/MagnificRogue/distnn",
    tag = "master"
 }
 
@@ -15,7 +15,8 @@ description = {
 }
 
 dependencies = {
-   "torch >= 7.0"
+   "torch >= 7.0",
+   "mpi >= 0.2-1"
 }
 
 build = {

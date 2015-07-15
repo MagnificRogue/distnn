@@ -1,7 +1,7 @@
 require 'torch'
 
-local examplepackage = {}
+local distnn = {}
 
-examplepackage.hellomodule = require 'examplepackage.hellomodule'
+distnn.hellomodule = require 'distnn.hellomodule'
 
-return examplepackage
+return distnn
