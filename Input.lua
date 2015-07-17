@@ -15,8 +15,17 @@ function Input.new(data, labels, size)
   self.data = data
   self.labels = labels
   self.size = size
+
+  self:distribute()
+
   return self
 end
 
+function Input.distribute()
+
+
+
+
+end
 
 return Input
