@@ -15,6 +15,15 @@ function Input.new( data, labels)
 
   self.data = data:type('torch.DoubleTensor')
   self.labels = labels:type('torch.DoubleTensor')
+
+  --[[
+      self.distributed_data is an array with the chunked data having been distributed
+      and having each index as the appropriate rank for which ever node the chunk is on.
+
+      Meaning, distributed_data[1] is the chunk that node 1 has
+
+  --]]
+
   self.distributed_data = {}
   self.distributed_labels = {}
 
