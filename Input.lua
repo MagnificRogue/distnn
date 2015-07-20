@@ -58,8 +58,10 @@ function Input.distribute(self)
 
 
       if mpi_info.rank == 0 then
-        if key > 0 then
+        if key ~= 0 then
           mpi.send(buff, count, mpi.double, key, tag, mpi_info.comm)
+        else
+          self.distributed_data[0] = item
         end
       else if mpi_info.rank == key then
         mpi.recv(buff, count, mpi.double, 0, tag, mpi_info.comm)
@@ -93,6 +95,8 @@ function Input.distribute(self)
       if mpi_info.rank == 0 then
         if key ~= 0 then
           mpi.send(buff, count, mpi.double, key, tag, mpi_info.comm)
+        else
+          self.distributed_labels[0] = item;
         end
       else if mpi_info.rank == key then
         mpi.recv(buff, count, mpi.double, 0, tag, mpi_info.comm)
