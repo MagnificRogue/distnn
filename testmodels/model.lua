@@ -1,9 +1,9 @@
 require("torch")
-require ("mpi")
-require ("ffi")
 require ("nn") 
+local mpi = require ("mpi")
+local ffi = require ("ffi")
 
-[[-- Just a test for moving parameters between models of the same architecture.
+--[[ Just a test for moving parameters between models of the same architecture.
      We create two really simple identical models, which get initialized with 
      different starting weights and biases. We then use getParameters() to extract
      the first model's weights and biases (in the form of a flat 1-D tensor).
@@ -51,7 +51,6 @@ t_param1 = torch.Tensor(s_param1, 1, #s_param1, 1)
 
 start = 1
 for i = 1, #tb_param2 do
-  size = #tb_param2[i]
   nElem = tb_param2[i]:nElement() 
   stop = start + nElem - 1
   print('nElem ' .. nElem)
