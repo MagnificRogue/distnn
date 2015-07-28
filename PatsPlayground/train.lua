@@ -79,8 +79,8 @@ else
   
 end
 
-  node_trainingData.size = function() return #labels end
-
+  node_trainingData.size = function() return (#node_trainingData.labels)[1] end
+  
   print(node_trainingData)
 
   mpi.barrier(mpi.comm_world)
@@ -99,7 +99,9 @@ local model = nn.Sequential()
 model:add(nn.SpatialConvolutionMM(1, 3, 3, 3))
 model:add(nn.SpatialConvolutionMM(3, 4, 3, 3))
 model:add(nn.SpatialMaxPooling(2,2,2,2))
-
+model:add(nn.View(4*6*6))
+model:add(nn.Linear(4*6*6, 128))
+model:add(nn.Linear(128, 10))
 
 ----rank 0 sends its initial parameters to each process
 
@@ -154,12 +156,21 @@ mpi.barrier(mpi.comm_world)
 local max_epochs = 1
 
 for epoch = 1, max_epochs do
-
   
+  --shuffle the indexes of your training samples
+  shuffle = torch.randperm(node_trainingData:size())
+
+  for t = 1, node_trainingData:size() do
+
+    local input = node_trainingData.data[shuffle[t]]
+  
+    model:forward(input)
+
+
+
+
+  end
    
-
-
-
 
 end
 
