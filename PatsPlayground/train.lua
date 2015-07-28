@@ -87,8 +87,97 @@ end
   --at this point, all the data is in node_trainingData
 
 
---[[
 
+--[[
+  --------------------------------------------------
+  --DISTRIBUTE THE MODEL----------------------------
+  --------------------------------------------------
+--]]
+
+--create a model on each node
+local model = nn.Sequential()
+model:add(nn.SpatialConvolutionMM(1, 3, 3, 3))
+model:add(nn.SpatialConvolutionMM(3, 4, 3, 3))
+model:add(nn.SpatialMaxPooling(2,2,2,2))
+
+
+----rank 0 sends its initial parameters to each process
+
+if rank == 0 then
+  local flat_parameters = model:getParameters()
+ 
+  print('model ' .. rank)
+  print(model:parameters()[1])
+ 
+  for dest = 1, size-1 do
+     mpi.send_tensor(flat_parameters, dest, 11, mpi.comm_world)
+  end
+  
+else
+  
+  local flat_parameters =  mpi.receive_tensor(1, 0, 11, mpi.comm_world)
+  
+  ---Maybe seperate these few lines into a function setParameters(model, flat_parameters) or something-----
+  parameters = model:parameters()
+
+  print('model ' .. rank .. ' before sync')
+  print(model:parameters()[1])
+
+  start = 1
+  for i = 1, #parameters do
+    nElem = parameters[i]:nElement() 
+    stop = start + nElem - 1 
+        
+    param_set = flat_parameters[{{start, stop}}]
+    param_set = param_set:viewAs(parameters[i])
+    model:parameters()[i]:copy(param_set)
+    start = start + nElem 
+  end
+  ---------
+
+  print('model ' .. rank .. ' after sync')
+  print(model:parameters()[1])
+
+end
+
+mpi.barrier(mpi.comm_world)
+--at this point, each node has a model with the same weights and biases
+
+
+--[[
+  --------------------------------------------------
+  --TRAINING----------------------------------------
+  --------------------------------------------------
+--]]
+
+
+local max_epochs = 1
+
+for epoch = 1, max_epochs do
+
+  
+   
+
+
+
+
+end
+
+
+
+
+
+
+
+
+
+mpi.finalize()
+
+
+
+
+--JUNK....
+--[[
 
 print("SAFE")
 
@@ -175,72 +264,4 @@ t_tstLabel = torch.Tensor(recov_tstLabel, 1, #recov_tstLabel, 1)
 
 
 mpi.barrier(comm)
-
---[[
-  --------------------------------------------------
-  --DISTRIBUTE THE MODEL----------------------------
-  --------------------------------------------------
 --]]
-
-
-
---[[
-local model = nn.Sequential()
-model:add(nn.SpatialConvolutionMM(1, 3, 3, 3))
-model:add(nn.SpatialConvolutionMM(3, 4, 3, 3))
-model:add(nn.SpatialMaxPooling(2,2,2,2))
-
-local param = model:parameters()
-
-print('model ' .. rank .. ' before bcast')
-print(model)
-print(param[1])
-
-local t_param = model:getParameters()
-local s_param = t_param:storage()
-local count = #s_param
-
---create buffer for sending/receiving parameters
-local buf = ffi.new("double[?]",count)
-
---node one will send its initial parameters to other nodes
-if rank == 0 then  
-  for i = 0, count-1 do
-    buf[i] = s_param[i+1]
-  end
-end
-
-mpi.bcast(buf, count, mpi.double, 0, comm)
-
-if rank ~= 0 then  
-  for i = 0, count-1 do
-    s_param[i+1] = buf[i]
-  end
-
-  t_param = torch.Tensor(s_param, 1, #s_param, 1)
-  --print(t_param)
-
-  --fill model parameters with recieved parameters
-  start = 1
-  for i = 1, #param do
-    nElem = param[i]:nElement() 
-    stop = start + nElem - 1 
-    t_elems = t_param[{{start, stop}}]
-    t_elems = t_elems:viewAs(param[i])
- 
-    param[i] = t_elems
-  
-    start = start + nElem 
-  end
-end
-print('model '..rank)
-print(param[1])
-
---[[
-  --------------------------------------------------
-  --TRAINING----------------------------------------
-  --------------------------------------------------
---]]
---]]
-
-mpi.finalize()
