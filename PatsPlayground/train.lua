@@ -1,7 +1,12 @@
 require("torch")
 require ("nn")
-local mpi = require ("mpi")
-local ffi = require ("ffi")
+
+mpi = require ("mpi")
+ffi = require ("ffi")
+dofile './distnn_libb.lua'
+
+
+
 
 comm = mpi.comm_world
 rank = comm:rank()
@@ -11,126 +16,89 @@ size = comm:size()
 height = 16
 width = 16
 channels = 1
-nTrain = 16
+nTrain = 100
 nTest = 8
 
 
-trndataCount = nTrain*channels*height*width
-tstdataCount = nTest*channels*height*width
+local node_trainingData = {}
 
---buffers to hold all the train/test data and labels (rank 0 uses these to send chunks)
-local trnDatabuf = ffi.new("double[?]", trndataCount)
-local tstDatabuf = ffi.new("double[?]", tstdataCount)
-local trnLabelbuf = ffi.new("double[?]", nTrain)
-local tstLabelbuf = ffi.new("double[?]", nTest)
-
---buffer for rank 0 to send train data chunk dimentions to other nodes
-local trnSizeinfo = ffi.new("int[4]")
---buffer for rank 0 to send test data chunk dimentions to other nodes
-local tstSizeinfo = ffi.new("int[4]")
 
 if rank == 0 then
-  
-  --just generating some random train/test data (later we'll load actual data)
-  trainData = {
-    data = torch.randn(nTrain, channels, height, width),
-    labels = torch.Tensor(nTrain),
-    size = function() return #labels end
-  }
-  i=0
-  trainData.labels:apply(function(x) i=i%10+1 return i end) 
-  
-  testData = {
-    data = torch.randn(nTest, channels, height, width),
-    labels = torch.Tensor(nTest),
-    size = function() return #labels end
-  }
-  i=0
-  testData.labels:apply(function(x) i=i%10+1 return i end) 
 
-  print(trainData)
-  print(testData)
+  dofile './generate_testing_data.lua'
+  dofile './generate_training_data.lua'
+
 
   --rank 0 chunks train data/labels and places in buffer
+
+  ---Lets send the data to each process!
+
+  for key, subbatch in ipairs(trainData.data:chunk(size,1))  do
+    
+    local target_node = key-1
+
+    local tensor = torch.Tensor(subbatch:size()):copy(subbatch)
+
+
+    if target_node ~= 0 then
+
+      mpi.send_tensor(tensor, target_node, 1, mpi.comm_world)
+ 
+    else
+
+     node_trainingData.data = tensor
+
+    end
+  end
+
+
+  for key, subbatch_labels in ipairs(trainData.labels:chunk(size,1)) do
+
+    local target_node = key-1
+
+    local tensor = torch.Tensor(subbatch_labels:size()):copy(subbatch_labels)
+
+
+    if target_node ~= 0 then
+      
+      mpi.send_tensor(tensor, target_node, 2, mpi.comm_world)
   
-  --fill train data buffer
-  for key, subbatch in ipairs(trainData.data:chunk(size, 1)) do
-    local node = key - 1
-    
-    print(#subbatch)
-    
-    --fill trnSizeinfo buffer with the dimentions of a chunk
-    for i=1, 4 do
-      trnSizeinfo[i-1] = (#subbatch)[i]
+    else
+
+      node_trainingData.labels = tensor
+
     end
 
-    local stor = subbatch:storage()
-    local count = stor:size()
-    
-    offset = node * ((trainData.data:chunk(size,1)[1]):nElement())
-    for i=1, count do
-      trnDatabuf[i+offset-1] = stor[i]
-    end
   end
 
-  --fill train labels buffer
-  for key, subbatch in ipairs(trainData.labels:chunk(size, 1)) do
-    local node = key - 1
-    
-    print(#subbatch)
 
-    local stor = subbatch:storage()
-    local count = stor:size()
-    
-    offset = node * ((trainData.labels:chunk(size,1)[1]):nElement())
-    for i=1, count do
-      trnLabelbuf[i+offset-1] = stor[i]
-    end
-  end
+else
+
+  node_trainingData.data = mpi.receive_tensor(4, 0, 1, mpi.comm_world)
+  node_trainingData.labels = mpi.receive_tensor(1, 0, 2, mpi.comm_world)
   
-  --fill test data buffer
-  for key, subbatch in ipairs(testData.data:chunk(size, 1)) do
-    local node = key - 1
-    
-    print(#subbatch)
-    
-    --fill tstSizeinfo buffer with the dimentions of a chunk
-    for i=1, 4 do
-      tstSizeinfo[i-1] = (#subbatch)[i]
-    end
-
-    local stor = subbatch:storage()
-    local count = stor:size()
-    
-    offset = node * ((testData.data:chunk(size,1)[1]):nElement())
-    for i=1, count do
-      tstDatabuf[i+offset-1] = stor[i]
-    end
-  end
-  
-  --fill test labels buffer
-  for key, subbatch in ipairs(testData.labels:chunk(size, 1)) do
-    local node = key - 1
-    
-    print(#subbatch)
-
-    local stor = subbatch:storage()
-    local count = stor:size()
-    
-    offset = node * ((testData.labels:chunk(size,1)[1]):nElement())
-    for i=1, count do
-      tstLabelbuf[i+offset-1] = stor[i]
-    end
-  end
 end
 
-print('barrier '..rank)
+  node_trainingData.size = function() return #labels end
+
+  print(node_trainingData)
+
+  mpi.barrier(mpi.comm_world)
+  --at this point, all the data is in node_trainingData
+
+
+--[[
+
+
+print("SAFE")
+
+print('barrier '.. rank)
 mpi.barrier(comm)
 
 print('hello '.. rank)
-
 --rank 0 broadcasts chunk size info to each node
-mpi.bcast(trnSizeinfo, 4, mpi.int, 0, comm)
+mpi.bcast(trnSizeinfo, 1, mpi.int, 0, comm)
+print("SAFE")
 trnSizes = torch.LongStorage(4)
 for i=1, 4 do
   trnSizes[i] = trnSizeinfo[i-1]
@@ -214,6 +182,9 @@ mpi.barrier(comm)
   --------------------------------------------------
 --]]
 
+
+
+--[[
 local model = nn.Sequential()
 model:add(nn.SpatialConvolutionMM(1, 3, 3, 3))
 model:add(nn.SpatialConvolutionMM(3, 4, 3, 3))
@@ -265,9 +236,11 @@ end
 print('model '..rank)
 print(param[1])
 
-
 --[[
   --------------------------------------------------
   --TRAINING----------------------------------------
   --------------------------------------------------
 --]]
+--]]
+
+mpi.finalize()
