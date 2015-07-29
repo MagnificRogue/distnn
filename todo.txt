@@ -1,0 +1,3 @@
+Issue: Chunking along the size of MPI isn't always optimal. It can lead to deadlocks of sending chunks to proccesses due to each node expecting a chunk while the chunk operation likes splitting some things along smaller grouping. (E.G. a torch.Tensor(8,x,y,z):chunk(6,1) will return 4 chunks instead of 6. THis can be problematic if you are chunking on the number of MPI nodes.
+
+
