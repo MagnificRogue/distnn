@@ -3,7 +3,9 @@ mpi = require 'mpi'
 
 local distnn = {}
 
-distnn.hellomodule = require 'distnn.hellomodule'
-distnn.Input = require 'distnn.Input'
+distnn.mpi_extensions = require 'distnn.mpi_extensions_module'
+--distnn.Input = require 'distnn.Input'
+
+
 
 return distnn
