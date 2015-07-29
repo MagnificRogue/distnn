@@ -7,7 +7,6 @@ dofile './distnn_libb.lua'
 
 
 
-
 comm = mpi.comm_world
 rank = comm:rank()
 size = comm:size()
@@ -16,7 +15,7 @@ size = comm:size()
 height = 16
 width = 16
 channels = 1
-nTrain = 100
+nTrain = 10
 nTest = 8
 
 
@@ -102,43 +101,25 @@ model:add(nn.SpatialMaxPooling(2,2,2,2))
 model:add(nn.View(4*6*6))
 model:add(nn.Linear(4*6*6, 128))
 model:add(nn.Linear(128, 10))
+model:add(nn.LogSoftMax())
+
+criterion = nn.ClassNLLCriterion()
+
+--extract parameters (and gradients) from each node's model
+--(we'll need to access the gradients during training)
+local parameters = model:getParameters()
 
 ----rank 0 sends its initial parameters to each process
-
 if rank == 0 then
-  local flat_parameters = model:getParameters()
- 
-  print('model ' .. rank)
-  print(model:parameters()[1])
  
   for dest = 1, size-1 do
-     mpi.send_tensor(flat_parameters, dest, 11, mpi.comm_world)
+     mpi.send_tensor(parameters, dest, 11, mpi.comm_world)
   end
   
 else
   
-  local flat_parameters =  mpi.receive_tensor(1, 0, 11, mpi.comm_world)
-  
-  ---Maybe seperate these few lines into a function setParameters(model, flat_parameters) or something-----
-  parameters = model:parameters()
-
-  print('model ' .. rank .. ' before sync')
-  print(model:parameters()[1])
-
-  start = 1
-  for i = 1, #parameters do
-    nElem = parameters[i]:nElement() 
-    stop = start + nElem - 1 
-        
-    param_set = flat_parameters[{{start, stop}}]
-    param_set = param_set:viewAs(parameters[i])
-    model:parameters()[i]:copy(param_set)
-    start = start + nElem 
-  end
-  ---------
-
-  print('model ' .. rank .. ' after sync')
-  print(model:parameters()[1])
+  --copy rank 0's parameters into this node's model
+  parameters:copy(mpi.receive_tensor(1, 0, 11, mpi.comm_world))
 
 end
 
@@ -152,7 +133,7 @@ mpi.barrier(mpi.comm_world)
   --------------------------------------------------
 --]]
 
-
+local learningRate = 0.01
 local max_epochs = 1
 
 for epoch = 1, max_epochs do
@@ -160,119 +141,47 @@ for epoch = 1, max_epochs do
   --shuffle the indexes of your training samples
   shuffle = torch.randperm(node_trainingData:size())
 
+
   for t = 1, node_trainingData:size() do
 
+    --load sample
     local input = node_trainingData.data[shuffle[t]]
-  
-    model:forward(input)
+    local target = node_trainingData.labels[shuffle[t]]
+    
+    --reset gradients
+    model:zeroGradParameters()        
+    
+    --feed forward through model
+    local output = model:forward(input)
+    
+    --calculate error
+    local err = criterion:forward(output, target)
+    
+    --calculate initial gradients at output layer
+    local gradInput = criterion:backward(output, target)
+    
+    --perform backpropagation 
+    model:updateGradInput(input, gradInput)
+    model:accUpdateGradParameters(input, gradInput, learningRate)
 
 
-
-
+    ------Average the weights across all models 
+    
+    --first a sum reduction to add weights across models
+    parameters = mpi.allreduce_tensor(parameters, mpi.sum, mpi.comm_world)
+    
+    --then each model divides its weights by the number of models
+    parameters:copy(parameters / size)
+    
+    --the network parameters should be consistant across models now
   end
-   
 
 end
 
-
-
-
-
-
-
-
+---training is complete
 
 mpi.finalize()
 
 
 
 
---JUNK....
---[[
-
-print("SAFE")
-
-print('barrier '.. rank)
-mpi.barrier(comm)
-
-print('hello '.. rank)
---rank 0 broadcasts chunk size info to each node
-mpi.bcast(trnSizeinfo, 1, mpi.int, 0, comm)
-print("SAFE")
-trnSizes = torch.LongStorage(4)
-for i=1, 4 do
-  trnSizes[i] = trnSizeinfo[i-1]
-end
-
-mpi.bcast(tstSizeinfo, 4, mpi.int, 0, comm)
-tstSizes = torch.LongStorage(4)
-for i=1, 4 do
-  tstSizes[i] = tstSizeinfo[i-1]
-end
-
-print('rank ' .. rank .. ' size of my chunk: ')
-print(trnSizes)
-print(tstSizes)
-
---now that each node has chunk size info, we can make the receiving buffers
-local nTrnElem = trnSizes[1] * trnSizes[2] * trnSizes[3] * trnSizes[4]
-print('nTrnElem ' .. nTrnElem)
-local mytrnDatabuf = ffi.new("double[?]", nTrnElem)
-
-local nTstElem = tstSizes[1] * tstSizes[2] * tstSizes[3] * tstSizes[4]
-print('nTrnElem ' .. nTrnElem)
-local mytstDatabuf = ffi.new("double[?]", nTstElem)
-
-local mytrnLabelbuf = ffi.new("double[?]", trnSizes[1])
-local mytstLabelbuf = ffi.new("double[?]", tstSizes[1])
-
-mpi.barrier(comm)
-
---scatter operations for train and test data and labels
---rank 0 scatters blocks of fixed size to other nodes
---this assumes the number of nodes divides the training data evenly (we may wanna fix this later to allow variable chunk sizes (it can be done with mpi.scatterv)) 
-mpi.scatter(trnDatabuf, nTrnElem, mpi.double, mytrnDatabuf, nTrnElem, mpi.double, 0, comm)
-mpi.scatter(trnLabelbuf, trnSizes[1], mpi.double, mytrnLabelbuf, trnSizes[1], mpi.double, 0, comm)
-mpi.scatter(tstDatabuf, nTstElem, mpi.double, mytstDatabuf, nTstElem, mpi.double, 0, comm)
-mpi.scatter(tstLabelbuf, tstSizes[1], mpi.double, mytstLabelbuf, tstSizes[1], mpi.double, 0, comm)
-
-mpi.barrier(comm)
-
-print('heyy ' .. rank)
-
---copy all the buffers into the appropriate tensors
-
---train data
-local recov_trnData = torch.DoubleStorage(nTrnElem)
-for i=1, nTrnElem do
-  recov_trnData[i] = mytrnDatabuf[i-1]
-end
-t_trnData = torch.Tensor(recov_trnData, 1, #recov_trnData, 1)
-t_trnData:view(trnSizes)
---print(#t_trnData)
-
---test data
-local recov_tstData = torch.DoubleStorage(nTstElem)
-for i=1, nTstElem do
-  recov_tstData[i] = mytstDatabuf[i-1]
-end
-t_tstData = torch.Tensor(recov_tstData, 1, #recov_tstData, 1)
-t_tstData:view(tstSizes)
-
---train labels
-local recov_trnLabel = torch.DoubleStorage(trnSizez[1])
-for i=1, nTrnElem do
-  recov_trnLabel[i] = mytrnLabelbuf[i-1]
-end
-t_trnLabel = torch.Tensor(recov_trnLabel, 1, #recov_trnLabel, 1)
-
---test labels
-local recov_tstLabel = torch.DoubleStorage(tstSizez[1])
-for i=1, nTrnElem do
-  recov_tstLabel[i] = mytstLabelbuf[i-1]
-end
-t_tstLabel = torch.Tensor(recov_tstLabel, 1, #recov_tstLabel, 1)
-
-
-mpi.barrier(comm)
---]]

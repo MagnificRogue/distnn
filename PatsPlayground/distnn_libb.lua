@@ -12,6 +12,33 @@
 
 
 
+mpi.allreduce_tensor = function(tensor, operation, comm_world)
+
+  local stor = tensor:storage()
+  local count = stor:size()
+  
+  --create send and receive buffers
+  local send_buffer = ffi.new("double[?]", count)
+  local recv_buffer = ffi.new("double[?]", count)
+  for i=1, count do
+    send_buffer[i-1] = stor[i]
+  end
+
+  --result of reduction will be stored in recv_buffer
+  mpi.allreduce(send_buffer, recv_buffer, count, mpi.double, operation, comm_world)
+
+  for i=1,count do
+    stor[i] = recv_buffer[i-1]
+  end
+  
+  --return a tensor with the original dimensions
+  tensor_size = tensor:size()
+  return torch.Tensor(stor,1,tensor_size)
+
+end
+
+
+
 mpi.send_tensor = function(tensor, receiver_rank, tag, com_world)
 
 
